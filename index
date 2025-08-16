@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Scotland Yard – Tabuleiro e Controle de Jogo</title>
+  <style>
+    :root{
+      --bg:#0f172a;
+      --panel:#111827;
+      --muted:#1f2937;
+      --accent:#22d3ee;
+      --text:#e5e7eb;
+      --sub:#9ca3af;
+      --ring:rgba(34,211,238,.5);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; background:linear-gradient(135deg,var(--bg),#060b23 60%);
+      color:var(--text); font:500 16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue","Noto Sans",sans-serif;
+      overflow:hidden; /* evita scroll */
+    }
+    .app{
+      display:grid; grid-template-columns: minmax(280px, 420px) 1fr; gap:16px; height:100vh; padding:16px;
+    }
+    .card{background:linear-gradient(180deg,var(--panel),#0b122b); border:1px solid #0b1022; border-radius:20px; box-shadow:0 10px 30px rgba(0,0,0,.35);}    
+    .sidebar{padding:16px; display:flex; flex-direction:column; gap:16px; min-height:0; overflow:auto;}
+    .section{border:1px solid #0d1532; border-radius:16px; padding:12px; background:linear-gradient(180deg,#0d1431,#0a1027);}    
+    .section h2{margin:0 0 8px; font-size:14px; letter-spacing:.4px; text-transform:uppercase; color:var(--sub)}
+
+    .players{display:grid; grid-template-columns: 1fr; gap:10px;}
+    .player{display:grid; grid-template-columns: 40px 1fr; align-items:center; gap:10px; padding:8px; border-radius:12px; background:var(--muted); border:1px solid #0a0f24;}
+    .pawn-slot{position:relative; width:40px; height:40px; border-radius:12px; background:#0c132e; border:1px dashed #1f2a57; display:flex; align-items:center; justify-content:center;}
+    .name-wrap{display:flex; gap:8px; align-items:center}
+    .swatch{width:12px; height:12px; border-radius:50%; outline:1px solid rgba(255,255,255,.25);}    
+    .player input{width:100%; background:#0b1126; color:var(--text); border:1px solid #1f2a57; border-radius:10px; padding:8px 10px; outline:none;}
+    .player input:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--ring)}
+
+    /* container para ícones ao lado do nome */
+    .meta{display:flex; gap:6px; align-items:center; margin-left:6px}
+
+    /* tokens (chave / distintivo) - pequenos no painel */
+    .token{width:28px; height:28px; border-radius:6px; display:inline-flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06); cursor:grab; font-size:16px; line-height:1; transition:transform .12s ease, font-size .12s ease;}
+    .token:active{cursor:grabbing}
+    /* ao estar no tabuleiro, aumentamos via escala */
+    .token.on-board{transform:scale(3); z-index:999;}
+    .token.small{width:28px; height:28px}
+
+    /* Peões */
+    .pawn{ --c:#fff; position:absolute; width:26px; height:26px; border-radius:50%; background:var(--c); cursor:grab; box-shadow:0 6px 18px rgba(0,0,0,.5), inset 0 0 0 2px rgba(0,0,0,.25); display:flex; align-items:center; justify-content:center; user-select:none; touch-action:none; border:2px solid rgba(255,255,255,.75);}    
+    .pawn:active{cursor:grabbing}
+    .pawn::after{content:""; position:absolute; width:8px; height:8px; border-radius:50%; background:rgba(0,0,0,.18); top:6px}
+
+    /* Área do tabuleiro */
+    .board-area{position:relative; height:100%}
+    .board-card{height:100%; display:flex; align-items:stretch; justify-content:flex-end; padding:12px}
+    .board{position:relative; height:100%; width:100%}
+    .board img{height:100%; width:100%; object-fit:contain; border-radius:16px; border:1px solid #0c1024; box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}    
+    .piece-layer{position:absolute; inset:0; /* pointer-events:auto para permitir arrastar peões no tabuleiro */}
+
+    /* Dado */
+    .dice-wrap{display:flex; align-items:center; gap:12px}
+    .dice{width:64px; height:64px; border-radius:14px; background:radial-gradient(120% 120% at 0% 0%, #1a2658, #0b122b); border:1px solid #0d1532; display:grid; place-items:center; font-weight:800; font-size:30px; cursor:pointer; user-select:none}
+    .dice:hover{box-shadow:0 0 0 3px var(--ring)}
+    .dice.rolling{animation: roll .6s ease-in-out both}
+    @keyframes roll{0%{transform:rotate(0) scale(1)} 30%{transform:rotate(90deg) scale(1.1)} 60%{transform:rotate(180deg) scale(0.96)} 100%{transform:rotate(360deg) scale(1)}}
+    .roll-info{color:var(--sub); font-size:14px}
+    .btns{display:flex; gap:8px; flex-wrap:wrap}
+    .btn{background:#0b1126; border:1px solid #1f2a57; color:var(--text); padding:8px 10px; border-radius:10px; cursor:pointer}
+    .btn:hover{border-color:var(--accent)}
+
+    .legend{display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:8px}
+    .legend .tag{display:flex; align-items:center; gap:6px; background:#0b1126; border:1px solid #1f2a57; padding:6px 8px; border-radius:10px; font-size:13px}
+
+    /* Mobile: permite rolar quando não couber tudo verticalmente */
+    @media (max-width: 980px){
+      body{overflow:auto}
+      .app{grid-template-columns: 1fr; height:auto}
+      .board-card{height:70vh}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Painel lateral -->
+    <aside class="sidebar card" aria-label="Painel de Controle">
+      <div class="section">
+        <h2>Jogadores & Peões</h2>
+        <div class="players" id="players"></div>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="section">
+        <h2>Dado (d6)</h2>
+        <div class="dice-wrap">
+          <div class="dice" id="dice" role="button" aria-label="Rolar dado" tabindex="0">–</div>
+          <div class="roll-info" id="rollInfo">Clique no dado para rolar.</div>
+        </div>
+        <div class="btns" style="margin-top:10px">
+          <button class="btn" id="clearBoard">Recolher peões</button>
+          <button class="btn" id="centerBoard">Centralizar tabuleiro</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Tabuleiro -->
+    <main class="board-area card" aria-label="Tabuleiro">
+      <div class="board-card">
+        <div class="board" id="board">
+          <img id="boardImg" alt="Tabuleiro Scotland Yard" src="https://i.ibb.co/TBbHw0LK/180528184119779.jpg" />
+          <div class="piece-layer" id="pieceLayer" aria-hidden="false"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    // ======= Config dos peões =======
+    const PAWNS = [
+      { id:'p1', color:'#ef4444', name:'Vermelho' },
+      { id:'p2', color:'#3b82f6', name:'Azul' },
+      { id:'p3', color:'#22c55e', name:'Verde' },
+      { id:'p4', color:'#eab308', name:'Amarelo' },
+      { id:'p5', color:'#a855f7', name:'Roxo' },
+      { id:'p6', color:'#fb923c', name:'Laranja' }
+    ];
+
+    const playersEl = document.getElementById('players');
+    const legendEl  = document.getElementById('legend');
+    const boardEl   = document.getElementById('board');
+    const layerEl   = document.getElementById('pieceLayer');
+
+    const pawnElems = new Map();
+    const slotElems = new Map();
+
+    function createPlayerRow(p){
+      const row = document.createElement('div');
+      row.className = 'player';
+
+      const slot = document.createElement('div');
+      slot.className = 'pawn-slot';
+      slot.id = `slot-${p.id}`;
+      slot.dataset.slotFor = p.id;
+
+      const nameWrap = document.createElement('div');
+      nameWrap.className = 'name-wrap';
+      const sw = document.createElement('div');
+      sw.className = 'swatch';
+      sw.style.background = p.color;
+      const input = document.createElement('input');
+      input.placeholder = `Nome do ${p.name}`;
+      input.value = '';
+      input.dataset.for = p.id;
+      input.addEventListener('input', syncLegend);
+
+      // container para os ícones (agora genéricos)
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.id = `meta-${p.id}`;
+
+      // token chave (emoji)
+      const key = document.createElement('div');
+      key.className = 'token small';
+      key.title = 'Chave';
+      key.dataset.origin = meta.id; // inicialmente no meta
+      key.dataset.type = 'token';
+      key.dataset.onBoard = 'false';
+      key.textContent = '🔑';
+
+      // token distintivo (emoji)
+      const badge = document.createElement('div');
+      badge.className = 'token small';
+      badge.title = 'Distintivo';
+      badge.dataset.origin = meta.id;
+      badge.dataset.type = 'token';
+      badge.dataset.onBoard = 'false';
+      badge.textContent = '🛡️';
+
+      // montar a linha
+      nameWrap.appendChild(sw);
+      nameWrap.appendChild(input);
+      nameWrap.appendChild(meta);
+      meta.appendChild(key);
+      meta.appendChild(badge);
+
+      row.appendChild(slot);
+      row.appendChild(nameWrap);
+      playersEl.appendChild(row);
+
+      // cria peão e estaciona no slot
+      const pawn = document.createElement('div');
+      pawn.className = 'pawn';
+      pawn.style.setProperty('--c', p.color);
+      pawn.title = `${p.name}`;
+      pawn.setAttribute('aria-label', `Peão ${p.name}`);
+      pawn.dataset.pawnId = p.id;
+      pawn.dataset.onBoard = 'false';
+      pawn.dataset.origin = slot.id; // usado para devolver ao slot
+      pawn.dataset.type = 'pawn';
+
+      makeDraggable(pawn);
+      slot.appendChild(pawn);
+
+      // tornar tokens arrastáveis (genéricos)
+      makeDraggable(key);
+      makeDraggable(badge);
+
+      pawnElems.set(p.id, pawn);
+      slotElems.set(p.id, slot);
+    }
+
+    function syncLegend(){
+      legendEl.innerHTML = '';
+      PAWNS.forEach(p => {
+        const val = document.querySelector(`input[data-for="${p.id}"]`).value || p.name;
+        const tag = document.createElement('div');
+        tag.className = 'tag';
+        const dot = document.createElement('div');
+        dot.className = 'swatch'; dot.style.background = p.color;
+        const txt = document.createElement('span'); txt.textContent = val;
+        tag.appendChild(dot); tag.appendChild(txt);
+        legendEl.appendChild(tag);
+      })
+    }
+
+    PAWNS.forEach(createPlayerRow);
+    syncLegend();
+
+    // ======= Arrastar (mouse & toque) =======
+    function makeDraggable(el){
+      let dragging = false, offsetX = 0, offsetY = 0;
+
+      const onPointerDown = (e) => {
+        const isTouch = e.type.startsWith('touch');
+        const point = isTouch ? e.touches[0] : e;
+        dragging = true;
+        el.style.pointerEvents = 'auto';
+        el.style.zIndex = 10;
+        // não alteramos transform aqui para não conflitar com o tamanho 'on-board'
+        el.dataset.dragging = 'true';
+
+        const rect = el.getBoundingClientRect();
+        offsetX = point.clientX - rect.left;
+        offsetY = point.clientY - rect.top;
+
+        document.addEventListener(isTouch ? 'touchmove' : 'mousemove', onPointerMove, {passive:false});
+        document.addEventListener(isTouch ? 'touchend'  : 'mouseup',   onPointerUp,   {passive:false});
+      };
+
+      const onPointerMove = (e) => {
+        if(!dragging) return;
+        const isTouch = e.type.startsWith('touch');
+        const point = isTouch ? e.touches[0] : e;
+        e.preventDefault();
+
+        // detecta se o ponteiro está sobre o tabuleiro
+        const bcr = boardEl.getBoundingClientRect();
+        const overBoard = point.clientX >= bcr.left && point.clientX <= bcr.right && point.clientY >= bcr.top && point.clientY <= bcr.bottom;
+
+        if(overBoard){
+          // garante que o elemento esteja no layer do tabuleiro e em modo grande
+          if(el.parentElement !== layerEl) layerEl.appendChild(el);
+          el.dataset.onBoard = 'true';
+          if(el.dataset.type === 'token') el.classList.add('on-board');
+          el.style.position = 'absolute';
+
+          const x = point.clientX - bcr.left - offsetX;
+          const y = point.clientY - bcr.top  - offsetY;
+          placeOnBoard(el, x, y);
+        } else {
+          // fora do tabuleiro: segue o ponteiro em fixed e volta ao tamanho pequeno
+          el.dataset.onBoard = 'false';
+          if(el.dataset.type === 'token') el.classList.remove('on-board');
+          el.style.position = 'fixed';
+          el.style.left = (point.clientX - offsetX) + 'px';
+          el.style.top  = (point.clientY - offsetY) + 'px';
+        }
+      };
+
+      const onPointerUp = (e) => {
+        if(!dragging) return;
+        dragging = false;
+        el.style.zIndex = '';
+        el.dataset.dragging = 'false';
+
+        const isTouch = e.type.startsWith('touch');
+        const point = isTouch ? (e.changedTouches ? e.changedTouches[0] : e.touches[0]) : e;
+        const bcr = boardEl.getBoundingClientRect();
+        const inside = point.clientX >= bcr.left && point.clientX <= bcr.right && point.clientY >= bcr.top && point.clientY <= bcr.bottom;
+
+        if(inside){
+          // colocar no layer do tabuleiro (já deve estar) e garantir classe grande
+          if(el.parentElement !== layerEl) layerEl.appendChild(el);
+          el.dataset.onBoard = 'true';
+          if(el.dataset.type === 'token') el.classList.add('on-board');
+
+          el.style.position = 'absolute';
+          const x = point.clientX - bcr.left - offsetX;
+          const y = point.clientY - bcr.top  - offsetY;
+          placeOnBoard(el, x, y);
+        } else {
+          // precisamos checar se o local de liberação foi um meta de jogador
+          // temporariamente desativamos pointer-events do elemento para descobrir o elemento abaixo
+          const prevPointer = el.style.pointerEvents;
+          el.style.pointerEvents = 'none';
+          const elem = document.elementFromPoint(point.clientX, point.clientY);
+          el.style.pointerEvents = prevPointer || '';
+
+          const meta = elem ? elem.closest('.meta') : null;
+
+          if(meta){
+            // anexar ao meta onde foi solto
+            meta.appendChild(el);
+            el.dataset.onBoard = 'false';
+            el.removeAttribute('style');
+            el.classList.remove('on-board');
+            // atualiza origem para esse novo meta (permite futuras devoluções)
+            el.dataset.origin = meta.id;
+          } else {
+            // devolver ao container de origem (slot ou meta original)
+            const originId = el.dataset.origin;
+            if(originId){
+              const origin = document.getElementById(originId);
+              if(origin) origin.appendChild(el);
+            }
+            el.dataset.onBoard = 'false';
+            el.removeAttribute('style');
+            // restaura classe conforme o tipo
+            if(el.dataset.type === 'pawn') el.className = 'pawn';
+            else el.className = 'token small';
+
+            // caso seja peão, reaplica cor
+            if(el.dataset.type === 'pawn'){
+              const p = PAWNS.find(pp=>pp.id===el.dataset.pawnId);
+              if(p) el.style.setProperty('--c', p.color);
+            }
+          }
+        }
+
+        document.removeEventListener(isTouch ? 'touchmove' : 'mousemove', onPointerMove, {passive:false});
+        document.removeEventListener(isTouch ? 'touchend'  : 'mouseup',   onPointerUp,   {passive:false});
+      };
+
+      el.addEventListener('mousedown', onPointerDown);
+      el.addEventListener('touchstart', onPointerDown, {passive:true});
+    }
+
+    function placeOnBoard(el, x, y){
+      const layerRect = boardEl.getBoundingClientRect();
+      const origW = el.offsetWidth || 26;
+      const origH = el.offsetHeight || 26;
+      const scale = el.classList.contains('on-board') ? 3 : 1;
+      const scaledW = origW * scale;
+      const scaledH = origH * scale;
+
+      // clamp position for the scaled visual box
+      const scaledLeft = Math.max(0, Math.min(layerRect.width  - scaledW, x));
+      const scaledTop  = Math.max(0, Math.min(layerRect.height - scaledH, y));
+
+      // convert to unscaled coordinates (because transform:scale will enlarge around center)
+      const unscaledLeft = scaledLeft + (origW - scaledW)/2;
+      const unscaledTop  = scaledTop  + (origH - scaledH)/2;
+
+      el.style.left = unscaledLeft + 'px';
+      el.style.top  = unscaledTop  + 'px';
+    }
+
+    // Botões
+    document.getElementById('centerBoard').addEventListener('click', () => {
+      document.getElementById('boardImg').scrollIntoView({behavior:'smooth', block:'center', inline:'end'});
+    });
+
+    document.getElementById('clearBoard').addEventListener('click', () => {
+      PAWNS.forEach(p => {
+        const pawn = pawnElems.get(p.id);
+        const slot = slotElems.get(p.id);
+        slot.appendChild(pawn);
+        pawn.dataset.onBoard = 'false';
+        pawn.removeAttribute('style');
+        pawn.className = 'pawn';
+        pawn.style.setProperty('--c', p.color);
+      })
+    });
+
+    // ======= Dado =======
+    const dice = document.getElementById('dice');
+    const rollInfo = document.getElementById('rollInfo');
+    let rolling = false, rollTimer = null;
+
+    function doRoll(){
+      if(rolling) return;
+      rolling = true;
+      dice.classList.add('rolling');
+
+      let t = 0;
+      rollTimer = setInterval(() => {
+        dice.textContent = 1 + Math.floor(Math.random()*6);
+        t += 50;
+        if(t >= 550){
+          clearInterval(rollTimer);
+          const final = 1 + Math.floor(Math.random()*6);
+          dice.textContent = final;
+          dice.classList.remove('rolling');
+          rolling = false;
+          const when = new Date();
+          const hh = when.getHours().toString().padStart(2,'0');
+          const mm = when.getMinutes().toString().padStart(2,'0');
+          rollInfo.textContent = `Resultado: ${final} (às ${hh}:${mm})`;
+        }
+      }, 50);
+    }
+
+    dice.addEventListener('click', doRoll);
+    dice.addEventListener('keydown', (e)=>{ if(e.key==='Enter' || e.key===' '){ doRoll(); }});
+
+    // Reenquadra itens dentro da nova área do tabuleiro ao redimensionar
+    window.addEventListener('resize', () => {
+      document.querySelectorAll('[data-on-board="true"]').forEach(el => {
+        const left = parseFloat(el.style.left||'0');
+        const top  = parseFloat(el.style.top ||'0');
+        placeOnBoard(el, left, top);
+      });
+    });
+  </script>
+</body>
+</html>
